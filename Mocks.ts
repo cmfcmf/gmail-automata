@@ -109,7 +109,7 @@ export default class Mocks {
 
     public static getMockTestSheetHeaders(): string[] {
         return [
-            "conditions", "add_labels", "move_to", "mark_important",
+            "conditions", "add_labels", "inbox_categories", "move_to", "mark_important",
             "mark_read", "stage", "auto_label", "disabled", "action_after_match"];
     }
 

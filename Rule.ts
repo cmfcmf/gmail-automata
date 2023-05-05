@@ -108,6 +108,7 @@ export class Rule {
         const header_map: { [key: string]: number } = {
             conditions: -1,
             add_labels: -1,
+            inbox_categories: -1,
             move_to: -1,
             mark_important: -1,
             mark_read: -1,
@@ -147,6 +148,8 @@ export class Rule {
             thread_action.addLabels(
                 Rule.parseStringList(values[row][header_map["add_labels"]], ","),
                 config.parent_labeling);
+            thread_action.addInboxCategories(
+                Rule.parseStringList(values[row][header_map["inbox_categories"]], ","));
             thread_action.move_to = Rule.parseInboxActionType(values[row][header_map["move_to"]]);
             thread_action.important = Rule.parseBooleanActionType(values[row][header_map["mark_important"]]);
             thread_action.read = Rule.parseBooleanActionType(values[row][header_map["mark_read"]]);

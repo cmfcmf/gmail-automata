@@ -192,6 +192,14 @@ export class ThreadData {
                 label_action_map[label_name].push(thread);
             });
 
+            if (action.inbox_category_names.size > 0) {
+              Gmail.Users!.Threads!.modify({
+                addLabelIds: Array.from(action.inbox_category_names.values()),
+                removeLabelIds: ThreadAction.INBOX_CATEGORIES.filter(
+                  inbox_category => !action.inbox_category_names.has(inbox_category)),
+              }, "me", thread.getId());
+            }
+
             // other actions
             moving_action_map.get(action.move_to)!.push(thread);
             important_action_map.get(action.important)!.push(thread);

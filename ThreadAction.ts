@@ -24,7 +24,11 @@ export default class ThreadAction {
 
     private static ACTION_CONFIG_TYPE_FIELD_NAMES: (keyof Pick<ThreadAction, "important" | "read" | "auto_label">)[] = ["important", "read", "auto_label"];
 
+    public static INBOX_CATEGORIES = ["CATEGORY_PERSONAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES",
+    "CATEGORY_FORUMS", "CATEGORY_SOCIAL"] as const;
+
     public readonly label_names: Set<string> = new Set<string>();
+    public readonly inbox_category_names = new Set<typeof ThreadAction.INBOX_CATEGORIES[number]>();
     public move_to: InboxActionType = InboxActionType.DEFAULT;
     public important: BooleanActionType = BooleanActionType.DEFAULT;
     public read: BooleanActionType = BooleanActionType.DEFAULT;
@@ -33,6 +37,7 @@ export default class ThreadAction {
 
     hasAnyAction() {
         return this.label_names.size > 0
+            || this.inbox_category_names.size > 0
             || this.move_to != InboxActionType.DEFAULT
             || this.important != BooleanActionType.DEFAULT
             || this.read != BooleanActionType.DEFAULT;
@@ -53,8 +58,19 @@ export default class ThreadAction {
         }
     }
 
+    addInboxCategories(inbox_categories: string[]) {
+      for (const label of inbox_categories) {
+          if (this.isInboxCategory(label)) {
+            this.inbox_category_names.add(label);
+          } else {
+            // TODO: error
+          }
+      }
+  }
+
     mergeFrom(other: Readonly<ThreadAction>, add_parent_labels: boolean): this {
         this.addLabels(Array.from(other.label_names.values()), add_parent_labels);
+        this.addInboxCategories(Array.from(other.inbox_category_names.values()));
         if (other.move_to != InboxActionType.DEFAULT) {
             this.move_to = other.move_to;
         }
@@ -67,7 +83,7 @@ export default class ThreadAction {
     }
 
     toString() {
-        let result = `>${InboxActionType[this.move_to]} +L${Array.from(this.label_names.values())}`;
+        let result = `>${InboxActionType[this.move_to]} +L${Array.from(this.label_names.values())} +IC${Array.from(this.inbox_category_names.values())}`;
         for (const name of ThreadAction.ACTION_CONFIG_TYPE_FIELD_NAMES) {
             switch (this[name]) {
                 case BooleanActionType.ENABLE:
@@ -79,6 +95,10 @@ export default class ThreadAction {
             }
         }
         return result;
+    }
+
+    private isInboxCategory(name: string): name is typeof ThreadAction.INBOX_CATEGORIES[number] {
+      return ThreadAction.INBOX_CATEGORIES.some(inbox_category => inbox_category === name);
     }
 
     static testThreadActions(it: Function, expect: Function) {
