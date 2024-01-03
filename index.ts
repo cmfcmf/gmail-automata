@@ -22,7 +22,7 @@ import {JestExpect, JestIt} from './JestSheets';
 import {Processor} from './Processor';
 import {Rule} from './Rule';
 import {Stats} from './Stats';
-import ThreadAction from './ThreadAction';
+import Action from "./Action";
 import Utils from './utils';
 
 // String.startsWith polyfill
@@ -158,6 +158,6 @@ function testAll() {
     Condition.testRegex(jestIt.it, jestExpect.expect);
     Condition.testConditionParsing(jestIt.it, jestExpect.expect);
     Rule.testRules(jestIt.it, jestExpect.expect);
-    ThreadAction.testThreadActions(jestIt.it, jestExpect.expect);
+    Action.testActions(jestIt.it, jestExpect.expect);
     Processor.testProcessing(jestIt.it, jestExpect.expect);
 }

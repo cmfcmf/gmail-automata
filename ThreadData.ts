@@ -15,13 +15,15 @@
  */
 
 import Utils from './utils';
-import ThreadAction, {BooleanActionType, InboxActionType} from './ThreadAction';
+import Action, {BooleanActionType, InboxActionType, ReadActionType} from "./Action";
 import {SessionData} from './SessionData';
 
 // Represents a message in a thread
 const MAX_BODY_PROCESSING_LENGTH = 65535;
 
 export class MessageData {
+    public readonly message_action = new Action();
+    public readonly raw: GoogleAppsScript.Gmail.GmailMessage;
 
     private static parseAddresses(str: string): string[] {
         return str.toLowerCase().split(',').map(address => address.trim());
@@ -90,6 +92,7 @@ export class MessageData {
     public readonly thread_first_message_subject: string;
 
     constructor(session_data: SessionData, message: GoogleAppsScript.Gmail.GmailMessage) {
+        this.raw = message;
         this.from = message.getFrom();
         this.to = MessageData.parseAddresses(message.getTo());
         this.cc = MessageData.parseAddresses(message.getCc());
@@ -130,6 +133,174 @@ export class MessageData {
     toString() {
         return this.subject;
     }
+
+    static applyAllActions(
+        session_data: SessionData,
+        all_message_data: MessageData[]
+    ) {
+        const label_action_map: {
+            [key: string]: GoogleAppsScript.Gmail.GmailMessage[];
+        } = {};
+        const moving_action_map = new Map<
+            InboxActionType,
+            GoogleAppsScript.Gmail.GmailMessage[]
+        >([
+            [InboxActionType.DEFAULT, []],
+            [InboxActionType.INBOX, []],
+            [InboxActionType.ARCHIVE, []],
+            [InboxActionType.TRASH, []],
+            [InboxActionType.MSG_INBOX, []],
+            [InboxActionType.MSG_ARCHIVE, []],
+            [InboxActionType.MSG_TRASH, []],
+        ]);
+        const important_action_map = new Map<
+            BooleanActionType,
+            GoogleAppsScript.Gmail.GmailMessage[]
+        >([
+            [BooleanActionType.DEFAULT, []],
+            [BooleanActionType.ENABLE, []],
+            [BooleanActionType.DISABLE, []],
+        ]);
+        const read_action_map = new Map<
+            ReadActionType,
+            GoogleAppsScript.Gmail.GmailMessage[]
+        >([
+            [ReadActionType.DEFAULT, []],
+            [ReadActionType.THREAD_READ, []],
+            [ReadActionType.THREAD_UNREAD, []],
+            [ReadActionType.MSG_READ, []],
+            [ReadActionType.MSG_UNREAD, []],
+        ]);
+        all_message_data.forEach((message_data) => {
+            const message = message_data.raw;
+            const action = message_data.message_action;
+            console.log(
+                `apply action ${action} to message '${message_data.subject}'`
+            );
+
+            // update label action map
+            action.label_names.forEach((label_name) => {
+                if (!(label_name in label_action_map)) {
+                    label_action_map[label_name] = [];
+                }
+                label_action_map[label_name].push(message);
+            });
+
+            if (action.inbox_category_names.size > 0) {
+              Gmail.Users!.Messages!.modify({
+                addLabelIds: Array.from(action.inbox_category_names.values()),
+                removeLabelIds: Action.INBOX_CATEGORIES.filter(
+                  (inbox_category) =>
+                    !action.inbox_category_names.has(inbox_category)
+                ),
+              }, "me", message.getId());
+            }
+
+            // other actions
+            moving_action_map.get(action.move_to)!.push(message);
+            important_action_map.get(action.important)!.push(message);
+            read_action_map.get(action.read)!.push(message);
+        });
+
+        Utils.withTimer("BatchApply", () => {
+            // batch update labels
+            for (const label_name in label_action_map) {
+                const messages = label_action_map[label_name];
+                session_data
+                    .getOrCreateLabel(label_name)
+                    .addToThreads(messages.map((message) => message.getThread()));
+                console.log(`add label ${label_name} to ${messages.length} threads`);
+            }
+            Logger.log(`Updated labels: ${Object.keys(label_action_map)}.`);
+
+            moving_action_map.forEach((messages, action_type) => {
+                switch (action_type) {
+                    case InboxActionType.INBOX:
+                        GmailApp.moveThreadsToInbox(
+                            messages.map((message) => message.getThread())
+                        );
+                        break;
+                    case InboxActionType.ARCHIVE:
+                        GmailApp.moveThreadsToArchive(
+                            messages.map((message) => message.getThread())
+                        );
+                        break;
+                    case InboxActionType.TRASH:
+                        GmailApp.moveThreadsToTrash(
+                            messages.map((message) => message.getThread())
+                        );
+                        break;
+                    case InboxActionType.MSG_INBOX:
+                        messages.forEach((message) =>
+                            Gmail.Users!.Messages!.modify(
+                                {addLabelIds: ["INBOX"]},
+                                "me",
+                                message.getId()
+                            )
+                        );
+                        break;
+                    case InboxActionType.MSG_ARCHIVE:
+                        messages.forEach((message) =>
+                            Gmail.Users!.Messages!.modify(
+                                {removeLabelIds: ["INBOX"]},
+                                "me",
+                                message.getId()
+                            )
+                        );
+                        break;
+                    case InboxActionType.MSG_TRASH:
+                        GmailApp.moveMessagesToTrash(messages);
+                        break;
+                }
+            });
+            important_action_map.forEach((messages, action_type) => {
+                switch (action_type) {
+                    case BooleanActionType.ENABLE:
+                        GmailApp.markThreadsImportant(
+                            messages.map((message) => message.getThread())
+                        );
+                        break;
+                    case BooleanActionType.DISABLE:
+                        GmailApp.markThreadsUnimportant(
+                            messages.map((message) => message.getThread())
+                        );
+                        break;
+                }
+            });
+            read_action_map.forEach((messages, action_type) => {
+                switch (action_type) {
+                    case ReadActionType.THREAD_READ:
+                        GmailApp.markThreadsRead(
+                            messages.map((message) => message.getThread())
+                        );
+                        break;
+                    case ReadActionType.THREAD_UNREAD:
+                        GmailApp.markThreadsUnread(
+                            messages.map((message) => message.getThread())
+                        );
+                        break;
+                    case ReadActionType.MSG_READ:
+                        GmailApp.markMessagesRead(messages);
+                        break;
+                    case ReadActionType.MSG_UNREAD:
+                        GmailApp.markMessagesUnread(messages);
+                        break;
+                }
+            });
+            Logger.log(`Updated messages status.`);
+
+            const all_threads = all_message_data.map((data) => data.raw.getThread());
+            if (session_data.config.processed_label.length > 0) {
+                session_data
+                    .getOrCreateLabel(session_data.config.processed_label)
+                    .addToThreads(all_threads);
+            }
+            session_data
+                .getOrCreateLabel(session_data.config.unprocessed_label)
+                .removeFromThreads(all_threads);
+            Logger.log(`Mark as processed.`);
+        });
+    }
 }
 
 // Represents a thread
@@ -137,7 +308,7 @@ export class ThreadData {
     private readonly raw: GoogleAppsScript.Gmail.GmailThread;
 
     public readonly message_data_list: MessageData[];
-    public readonly thread_action = new ThreadAction();
+    public readonly thread_action = new Action();
 
     constructor(session_data: SessionData, thread: GoogleAppsScript.Gmail.GmailThread) {
         this.raw = thread;
@@ -171,13 +342,17 @@ export class ThreadData {
     static applyAllActions(session_data: SessionData, all_thread_data: ThreadData[]) {
         const label_action_map: { [key: string]: GoogleAppsScript.Gmail.GmailThread[] } = {};
         const moving_action_map = new Map<InboxActionType, GoogleAppsScript.Gmail.GmailThread[]>([
-            [InboxActionType.DEFAULT, []], [InboxActionType.INBOX, []], [InboxActionType.ARCHIVE, []], [InboxActionType.TRASH, []]
+            [InboxActionType.DEFAULT, []],
+            [InboxActionType.INBOX, []], [InboxActionType.ARCHIVE, []], [InboxActionType.TRASH, []],
+            [InboxActionType.MSG_INBOX, []], [InboxActionType.MSG_ARCHIVE, []], [InboxActionType.MSG_TRASH, []],
         ]);
         const important_action_map = new Map<BooleanActionType, GoogleAppsScript.Gmail.GmailThread[]>([
             [BooleanActionType.DEFAULT, []], [BooleanActionType.ENABLE, []], [BooleanActionType.DISABLE, []]
         ]);
-        const read_action_map = new Map<BooleanActionType, GoogleAppsScript.Gmail.GmailThread[]>([
-            [BooleanActionType.DEFAULT, []], [BooleanActionType.ENABLE, []], [BooleanActionType.DISABLE, []]
+        const read_action_map = new Map<ReadActionType, GoogleAppsScript.Gmail.GmailThread[]>([
+            [ReadActionType.DEFAULT, []],
+            [ReadActionType.THREAD_READ, []], [ReadActionType.THREAD_UNREAD, []],
+            [ReadActionType.MSG_READ, []], [ReadActionType.MSG_UNREAD, []],
         ]);
         all_thread_data.forEach(thread_data => {
             const thread = thread_data.raw;
@@ -194,8 +369,8 @@ export class ThreadData {
 
             if (action.inbox_category_names.size > 0) {
               Gmail.Users!.Threads!.modify({
-                addLabelIds: Array.from(action.inbox_category_names.values()),
-                removeLabelIds: ThreadAction.INBOX_CATEGORIES.filter(
+                  addLabelIds: Array.from(action.inbox_category_names.values()),
+                  removeLabelIds: Action.INBOX_CATEGORIES.filter(
                   inbox_category => !action.inbox_category_names.has(inbox_category)),
               }, "me", thread.getId());
             }
@@ -240,10 +415,10 @@ export class ThreadData {
             });
             read_action_map.forEach((threads, action_type) => {
                 switch (action_type) {
-                    case BooleanActionType.ENABLE:
+                    case ReadActionType.THREAD_READ:
                         GmailApp.markThreadsRead(threads);
                         break;
-                    case BooleanActionType.DISABLE:
+                    case ReadActionType.THREAD_UNREAD:
                         GmailApp.markThreadsUnread(threads);
                         break;
                 }

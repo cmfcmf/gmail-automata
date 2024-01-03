@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {ActionAfterMatchType, BooleanActionType, InboxActionType} from './ThreadAction';
+import {ActionAfterMatchType, BooleanActionType, InboxActionType} from './Action';
 import {SessionData} from './SessionData';
-import {ThreadData} from './ThreadData';
+import {MessageData, ThreadData} from './ThreadData';
 import {Stats} from './Stats';
 import Utils from './utils';
 import Mocks from './Mocks';
@@ -26,50 +26,11 @@ export class Processor {
     private static processThread(session_data: SessionData, thread_data: ThreadData) {
         let thread_matched_a_rule = false;
         for (const message_data of thread_data.message_data_list) {
-            // Apply each rule until matching a rule with a DONE action or matching a rule with
-            // FINISH_STAGE and then exhausting all other rules in that stage.
-            let min_stage = 0;
-            let max_stage = Number.MAX_VALUE;
-            for (const rule of session_data.rules) {
-                if (rule.stage < min_stage) {
-                    continue;
-                }
-                if (rule.stage > max_stage) {
-                    break;
-                }
-                if (rule.condition.match(message_data)) {
-                    thread_matched_a_rule = true;
-                    console.log(`rule ${rule} matches message ${message_data}, apply action ${rule.thread_action}`);
-                    thread_data.thread_action.mergeFrom(rule.thread_action, session_data.config.parent_labeling);
-                    let endThread = false;
-                    switch (rule.thread_action.action_after_match) {
-                        case ActionAfterMatchType.DONE:
-                            // Break out of switch and then out of loop.
-                            endThread = true;
-                            break;
-                        case ActionAfterMatchType.FINISH_STAGE:
-                        case ActionAfterMatchType.DEFAULT:
-                            max_stage = rule.stage;
-                            break;
-                        case ActionAfterMatchType.NEXT_STAGE:
-                            min_stage = rule.stage + 1;
-                            max_stage = Number.MAX_VALUE;
-                            break;
-                    }
-                    if (endThread) {
-                        break;
-                    }
-                }
-            }
-            console.log(`Message is processed at stage ${max_stage}`);
-
-            // TODO: revisiting if auto labeling should be done differently
-            // update auto labeling
-            // if (thread_data.thread_action.auto_label == BooleanActionType.ENABLE) {
-            //   thread_data.thread_action.addLabels([
-            //     `${session_data.config.auto_labeling_parent_label}/${message_data.list}`]);
-            // }
-
+            thread_matched_a_rule ||= Processor.processMessage(
+                session_data,
+                message_data,
+                thread_data
+            );
         }
         if (!thread_matched_a_rule) {
             const last_message = thread_data.getLatestMessage();
@@ -80,6 +41,72 @@ export class Processor {
         }
     }
 
+    private static processMessage(
+        session_data: SessionData,
+        message_data: MessageData,
+        thread_data?: ThreadData
+    ): boolean {
+        let matched_a_rule = false;
+
+        // Apply each rule until matching a rule with a DONE action or matching a rule with
+        // FINISH_STAGE and then exhausting all other rules in that stage.
+        let min_stage = 0;
+        let max_stage = Number.MAX_VALUE;
+        for (const rule of session_data.rules) {
+            if (rule.stage < min_stage) {
+                continue;
+            }
+            if (rule.stage > max_stage) {
+                break;
+            }
+            if (rule.condition.match(message_data)) {
+                matched_a_rule = true;
+                console.log(
+                    `rule ${rule} matches message ${message_data}, apply action ${rule.action}`
+                );
+                if (thread_data) {
+                    thread_data.thread_action.mergeFrom(
+                        rule.action,
+                        session_data.config.parent_labeling
+                    );
+                } else {
+                    message_data.message_action.mergeFrom(
+                        rule.action,
+                        session_data.config.parent_labeling
+                    );
+                }
+                let end = false;
+                switch (rule.action.action_after_match) {
+                    case ActionAfterMatchType.DONE:
+                // Break out of switch and then out of loop.
+                        end = true;
+                        break;
+                    case ActionAfterMatchType.FINISH_STAGE:
+                    case ActionAfterMatchType.DEFAULT:
+                        max_stage = rule.stage;
+                        break;
+                    case ActionAfterMatchType.NEXT_STAGE:
+                        min_stage = rule.stage + 1;
+                        max_stage = Number.MAX_VALUE;
+                        break;
+                }
+                if (end) {
+                    break;
+                }
+            }
+        }
+        console.log(`Message is processed at stage ${max_stage}`);
+
+        // TODO: revisiting if auto labeling should be done differently
+        // update auto labeling
+        // if (thread_data.thread_action.auto_label == BooleanActionType.ENABLE) {
+        //   thread_data.thread_action.addLabels([
+        //     `${session_data.config.auto_labeling_parent_label}/${message_data.list}`]);
+        // }
+
+        return matched_a_rule;
+    }
+
     public static processAllUnprocessedThreads() {
         const start_time = new Date();
 
@@ -88,19 +115,48 @@ export class Processor {
             return;
         }
 
-        const unprocessed_threads = Utils.withTimer("fetchUnprocessedThreads",
-            () => GmailApp.search('label:' + session_data.config.unprocessed_label, 0,
-                session_data.config.max_threads));
+        const unprocessed_threads = Utils.withTimer(
+            "fetchUnprocessedThreads",
+            () => []
+            // GmailApp.search(
+            //   "label:" + session_data.config.unprocessed_label,
+            //   0,
+            //   session_data.config.max_threads
+            // )
+        );
         Logger.log(`Found ${unprocessed_threads.length} unprocessed threads.`);
-        if (!unprocessed_threads) {
+
+        const userLabels = Gmail.Users?.Labels?.list('me').labels ?? [];
+
+        const unprocessed_messages = Utils.withTimer(
+            "fetchUnprocessedMessages",
+            () =>
+                Gmail.Users?.Messages?.list("me", {
+                    labelIds: [userLabels.find(label => label.name === (session_data.config.unprocessed_label))!.id!],
+                    maxResults: session_data.config.max_threads,
+                    includeSpamTrash: false,
+                }).messages?.map((message) => GmailApp.getMessageById(message.id!)) ??
+                []
+        );
+        Logger.log(`Found ${unprocessed_messages.length} unprocessed messages.`);
+
+        if (unprocessed_threads.length === 0 && unprocessed_messages.length === 0) {
             Logger.log(`All emails are processed, skip.`);
             return;
         }
 
-        const all_thread_data = Utils.withTimer("transformIntoThreadData",
-            () => unprocessed_threads.map(thread => new ThreadData(session_data, thread)));
+        const all_thread_data = Utils.withTimer("transformIntoThreadData", () =>
+            unprocessed_threads.map((thread) => new ThreadData(session_data, thread))
+        );
 
-        let processed_thread_count = 0, processed_message_count = 0;
+        const all_message_data = Utils.withTimer("transformIntoMessageData", () =>
+            unprocessed_messages.map(
+                (message) => new MessageData(session_data, message)
+            )
+        );
+
+        let processed_thread_count = 0,
+            processed_message_count = 0;
         let all_pass = true;
         Utils.withTimer("collectActions", () => {
             for (const thread_data of all_thread_data) {
@@ -115,13 +171,41 @@ export class Processor {
                     // move to inbox for visibility
                     thread_data.thread_action.move_to = InboxActionType.INBOX;
                     thread_data.thread_action.label_names.clear();
-                    thread_data.thread_action.label_names.add(session_data.config.processing_failed_label);
+                    thread_data.thread_action.label_names.add(
+                        session_data.config.processing_failed_label
+                    );
+                }
+            }
+            for (const message_data of all_message_data) {
+                try {
+                    Processor.processMessage(session_data, message_data);
+                    processed_message_count++;
+                } catch (e) {
+                    all_pass = false;
+                    console.error(`Process email failed: ${e}`);
+                    Logger.log(`Process email failed: ${e}`);
+                    // move to inbox for visibility
+                    message_data.message_action.move_to = InboxActionType.INBOX;
+                    message_data.message_action.label_names.clear();
+                    message_data.message_action.label_names.add(
+                        session_data.config.processing_failed_label
+                    );
                 }
             }
         });
-        Logger.log(`Processed ${processed_thread_count} out of ${unprocessed_threads.length}.`);
+        Logger.log(
+            `Processed ${processed_thread_count} out of ${unprocessed_threads.length}.`
+        );
+        Logger.log(
+            `Processed ${processed_message_count} out of ${unprocessed_messages.length}.`
+        );
 
-        Utils.withTimer("applyAllActions", () => ThreadData.applyAllActions(session_data, all_thread_data));
+        Utils.withTimer("applyAllActions", () =>
+            ThreadData.applyAllActions(session_data, all_thread_data)
+        );
+        Utils.withTimer("applyAllMessageActions", () =>
+            MessageData.applyAllActions(session_data, all_message_data)
+        );
 
         Utils.withTimer('addStatRecord',
             () => Stats.addStatRecord(start_time, processed_thread_count, processed_message_count));

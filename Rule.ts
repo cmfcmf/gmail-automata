@@ -18,17 +18,17 @@ import Utils from './utils';
 import Condition from "./Condition";
 import {Config} from './Config'
 import Mocks from "./Mocks";
-import ThreadAction, {ActionAfterMatchType, BooleanActionType, InboxActionType} from './ThreadAction';
+import Action, {ActionAfterMatchType, BooleanActionType, InboxActionType, ReadActionType} from "./Action";
 
 export class Rule {
 
     public readonly condition: Condition;
-    public readonly thread_action: Readonly<ThreadAction>;
+    public readonly action: Readonly<Action>;
     public readonly stage: number;
 
-    constructor(condition_str: string, thread_action: ThreadAction, stage: number) {
+    constructor(condition_str: string, action: Action, stage: number) {
         this.condition = new Condition(condition_str);
-        this.thread_action = thread_action;
+        this.action = action;
         this.stage = stage;
     }
 
@@ -79,6 +79,23 @@ export class Rule {
         }
         const result = InboxActionType[str.toUpperCase() as keyof typeof InboxActionType];
         Utils.assert(result !== undefined, `Can't parse inbox action value ${str}.`);
+        return result;
+    }
+
+    private static parseReadActionType(str: string): ReadActionType {
+        if (str.length === 0) {
+            return ReadActionType.DEFAULT;
+        }
+
+        if (str.toLowerCase() === "yes") {
+            str = "THREAD_READ";
+        } else if (str.toLowerCase() === "no") {
+            str = "THREAD_UNREAD";
+        }
+
+        const result =
+            ReadActionType[str.toUpperCase() as keyof typeof ReadActionType];
+        Utils.assert(result !== undefined, `Can't parse read action value ${str}.`);
         return result;
     }
 
@@ -144,21 +161,21 @@ export class Rule {
                 continue;
             }
 
-            const thread_action = new ThreadAction();
-            thread_action.addLabels(
+            const action = new Action();
+            action.addLabels(
                 Rule.parseStringList(values[row][header_map["add_labels"]], ","),
                 config.parent_labeling);
-            thread_action.addInboxCategories(
+            action.addInboxCategories(
                 Rule.parseStringList(values[row][header_map["inbox_categories"]], ","));
-            thread_action.move_to = Rule.parseInboxActionType(values[row][header_map["move_to"]]);
-            thread_action.important = Rule.parseBooleanActionType(values[row][header_map["mark_important"]]);
-            thread_action.read = Rule.parseBooleanActionType(values[row][header_map["mark_read"]]);
-            thread_action.auto_label = Rule.parseBooleanActionType(values[row][header_map["auto_label"]]);
+            action.move_to = Rule.parseInboxActionType(values[row][header_map["move_to"]]);
+            action.important = Rule.parseBooleanActionType(values[row][header_map["mark_important"]]);
+            action.read = Rule.parseReadActionType(values[row][header_map["mark_read"]]);
+            action.auto_label = Rule.parseBooleanActionType(values[row][header_map["auto_label"]]);
             const actionAfterMatchStr = values[row][header_map["action_after_match"]] || '';
-            thread_action.action_after_match = Rule.parseActionAfterMatchType(actionAfterMatchStr);
+            action.action_after_match = Rule.parseActionAfterMatchType(actionAfterMatchStr);
 
             const stage = Rule.parseNumberValue(values[row][header_map["stage"]]);
-            rules.push(new Rule(condition_str, thread_action, stage));
+            rules.push(new Rule(condition_str, action, stage));
         }
 
         // sort by stage
@@ -234,7 +251,7 @@ export class Rule {
 
             expect(rules.length).toBe(1);
             expect(rules[0].stage).toBe(5);
-            expect(rules[0].thread_action.label_names.size).toBe(2);
+            expect(rules[0].action.label_names.size).toBe(2);
             expect(condition_headers).toEqual([]);
         })
 
@@ -249,11 +266,11 @@ export class Rule {
 
             const rules = Rule.parseRules(sheet, config);
             const condition_headers = Rule.getConditionHeaders(rules);
-     
+
             const expected_labels = new Set(['abc', 'abc/def', 'xyz', 'xyz/123'])
             expect(rules.length).toBe(1);
             expect(rules[0].stage).toBe(5);
-            expect(rules[0].thread_action.label_names).toEqual(expected_labels);
+            expect(rules[0].action.label_names).toEqual(expected_labels);
             expect(condition_headers).toEqual([]);
         })
 
@@ -273,7 +290,7 @@ export class Rule {
           
             expect(rules.length).toBe(1);
             expect(rules[0].stage).toBe(5);
-            expect(rules[0].thread_action.label_names).toEqual(expected_labels);
+            expect(rules[0].action.label_names).toEqual(expected_labels);
             expect(condition_headers).toEqual([]);
         })
 
@@ -329,9 +346,9 @@ export class Rule {
 
             expect(rules.length).toBe(2);
             expect(rules[0].stage).toBe(10);
-            expect(rules[0].thread_action.label_names).toEqual(new Set(['def', 'uvw']));
+            expect(rules[0].action.label_names).toEqual(new Set(['def', 'uvw']));
             expect(rules[1].stage).toBe(15);
-            expect(rules[1].thread_action.label_names).toEqual(new Set(['abc']));
+            expect(rules[1].action.label_names).toEqual(new Set(['abc']));
             expect(condition_headers).toEqual(
                 ['Test1', 'h2', 'X-List', 'h3', 'h5']);
         })

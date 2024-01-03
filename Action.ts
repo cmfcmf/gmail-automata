@@ -16,22 +16,27 @@
 
 export enum BooleanActionType {DEFAULT, ENABLE, DISABLE}
 
-export enum InboxActionType {DEFAULT, INBOX, ARCHIVE, TRASH}
+export enum InboxActionType {DEFAULT, INBOX, ARCHIVE, TRASH, MSG_INBOX, MSG_ARCHIVE, MSG_TRASH}
+
+export enum ReadActionType {DEFAULT, THREAD_READ, THREAD_UNREAD, MSG_READ, MSG_UNREAD}
 
 export enum ActionAfterMatchType {DEFAULT, DONE, FINISH_STAGE, NEXT_STAGE}
 
-export default class ThreadAction {
+/**
+ * An action can apply to a whole thread or a single message.
+ */
+export default class Action {
 
-    private static ACTION_CONFIG_TYPE_FIELD_NAMES: (keyof Pick<ThreadAction, "important" | "read" | "auto_label">)[] = ["important", "read", "auto_label"];
+    private static ACTION_CONFIG_TYPE_FIELD_NAMES: (keyof Pick<Action, "important" | "auto_label">)[] = ["important", "auto_label"];
 
     public static INBOX_CATEGORIES = ["CATEGORY_PERSONAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES",
     "CATEGORY_FORUMS", "CATEGORY_SOCIAL"] as const;
 
     public readonly label_names: Set<string> = new Set<string>();
-    public readonly inbox_category_names = new Set<typeof ThreadAction.INBOX_CATEGORIES[number]>();
+    public readonly inbox_category_names = new Set<typeof Action.INBOX_CATEGORIES[number]>();
     public move_to: InboxActionType = InboxActionType.DEFAULT;
     public important: BooleanActionType = BooleanActionType.DEFAULT;
-    public read: BooleanActionType = BooleanActionType.DEFAULT;
+    public read: ReadActionType = ReadActionType.DEFAULT;
     public auto_label: BooleanActionType = BooleanActionType.DEFAULT;
     public action_after_match: ActionAfterMatchType = ActionAfterMatchType.DEFAULT;
 
@@ -40,7 +45,7 @@ export default class ThreadAction {
             || this.inbox_category_names.size > 0
             || this.move_to != InboxActionType.DEFAULT
             || this.important != BooleanActionType.DEFAULT
-            || this.read != BooleanActionType.DEFAULT;
+            || this.read != ReadActionType.DEFAULT;
     }
 
     addLabels(new_label_names: string[], add_parent_labels: boolean) {
@@ -68,13 +73,16 @@ export default class ThreadAction {
       }
   }
 
-    mergeFrom(other: Readonly<ThreadAction>, add_parent_labels: boolean): this {
+    mergeFrom(other: Readonly<Action>, add_parent_labels: boolean): this {
         this.addLabels(Array.from(other.label_names.values()), add_parent_labels);
         this.addInboxCategories(Array.from(other.inbox_category_names.values()));
         if (other.move_to != InboxActionType.DEFAULT) {
             this.move_to = other.move_to;
         }
-        for (const name of ThreadAction.ACTION_CONFIG_TYPE_FIELD_NAMES) {
+        if (other.read != ReadActionType.DEFAULT) {
+            this.read = other.read;
+        }
+        for (const name of Action.ACTION_CONFIG_TYPE_FIELD_NAMES) {
             if (other[name] != BooleanActionType.DEFAULT) {
                 this[name] = other[name];
             }
@@ -83,8 +91,8 @@ export default class ThreadAction {
     }
 
     toString() {
-        let result = `>${InboxActionType[this.move_to]} +L${Array.from(this.label_names.values())} +IC${Array.from(this.inbox_category_names.values())}`;
-        for (const name of ThreadAction.ACTION_CONFIG_TYPE_FIELD_NAMES) {
+        let result = `>${InboxActionType[this.move_to]} +L${Array.from(this.label_names.values())} +IC${Array.from(this.inbox_category_names.values())} +R${ReadActionType[this.read]} `;
+        for (const name of Action.ACTION_CONFIG_TYPE_FIELD_NAMES) {
             switch (this[name]) {
                 case BooleanActionType.ENABLE:
                     result += ` +${name[0].toUpperCase()}`;
@@ -97,85 +105,85 @@ export default class ThreadAction {
         return result;
     }
 
-    private isInboxCategory(name: string): name is typeof ThreadAction.INBOX_CATEGORIES[number] {
-      return ThreadAction.INBOX_CATEGORIES.some(inbox_category => inbox_category === name);
+    private isInboxCategory(name: string): name is typeof Action.INBOX_CATEGORIES[number] {
+      return Action.INBOX_CATEGORIES.some(inbox_category => inbox_category === name);
     }
 
-    static testThreadActions(it: Function, expect: Function) {
+    static testActions(it: Function, expect: Function) {
         it('Adds parent labels', () => {
             const labels = ['list/abc', 'bot/team1/test', 'bot/team1/alert', 'def'];
-            const action = new ThreadAction();
+            const action = new Action();
             const expected = new Set(['list', 'list/abc', 'bot', 'bot/team1', 'bot/team1/test', 'bot/team1/alert', 'def']);
-          
+
             action.addLabels(labels, true);
-          
+
             expect(action.label_names).toEqual(expected);
         });
 
         it('Does not add parent labels if disabled', () => {
             const labels = ['list/abc', 'bot/team1/test', 'bot/team1/alert', 'def'];
-            const action = new ThreadAction();
+            const action = new Action();
             const expected = new Set(['list/abc', 'bot/team1/test', 'bot/team1/alert', 'def']);
-          
+
             action.addLabels(labels, false);
-          
+
             expect(action.label_names).toEqual(expected);
         });
 
         it('Does not add parent labels for empty list', () => {
             const labels: string[] = [];
-            const action = new ThreadAction();
-            
+            const action = new Action();
+
             action.addLabels(labels, true);
-            
+
             expect(action.label_names.size).toBe(0);
         });
 
         it('Uses Default action for rules', () => {
-            const thread_data_action = new ThreadAction();
+            const thread_data_action = new Action();
 
             expect(thread_data_action.move_to).toBe(InboxActionType.DEFAULT);
         });
 
         it('Default Actions for message', () => {
-            const message_action = new ThreadAction();
-            
+            const message_action = new Action();
+
             expect(message_action.move_to).toBe(InboxActionType.DEFAULT);
             expect(message_action.important).toBe(BooleanActionType.DEFAULT);
             expect(message_action.read).toBe(BooleanActionType.DEFAULT);
         });
 
         it('Merges the final Actions from a single rule', () => {
-            const message_action = new ThreadAction();
-            const rule1_action = new ThreadAction;
+            const message_action = new Action();
+            const rule1_action = new Action;
             rule1_action.move_to = InboxActionType.ARCHIVE;
             rule1_action.important = BooleanActionType.ENABLE;
-            rule1_action.read = BooleanActionType.ENABLE;
-            
+            rule1_action.read = ReadActionType.THREAD_READ;
+
             message_action.mergeFrom(rule1_action, true);
-            
+
             expect(message_action.move_to).toBe(InboxActionType.ARCHIVE);
             expect(message_action.important).toBe(BooleanActionType.ENABLE);
-            expect(message_action.read).toBe(BooleanActionType.ENABLE);
+            expect(message_action.read).toBe(ReadActionType.THREAD_READ);
         });
 
         it('Merges the final Actions from multiple rules', () => {
-            const message_action = new ThreadAction();
-            const rule1_action = new ThreadAction;
-            const rule2_action = new ThreadAction;
+            const message_action = new Action();
+            const rule1_action = new Action;
+            const rule2_action = new Action;
             rule1_action.move_to = InboxActionType.ARCHIVE;
             rule1_action.important = BooleanActionType.ENABLE;
-            rule1_action.read = BooleanActionType.ENABLE;
+            rule1_action.read = ReadActionType.THREAD_READ;
             rule2_action.move_to = InboxActionType.TRASH;
             rule2_action.important = BooleanActionType.DISABLE;
-            rule2_action.read = BooleanActionType.DISABLE;
+            rule2_action.read = ReadActionType.THREAD_UNREAD;
 
             message_action.mergeFrom(rule1_action, true);
             message_action.mergeFrom(rule2_action, true);
 
             expect(message_action.move_to).toBe(InboxActionType.TRASH);
             expect(message_action.important).toBe(BooleanActionType.DISABLE);
-            expect(message_action.read).toBe(BooleanActionType.DISABLE);
+            expect(message_action.read).toBe(ReadActionType.THREAD_UNREAD);
         });
     }
 }
