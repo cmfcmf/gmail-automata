@@ -141,6 +141,9 @@ export class MessageData {
         const label_action_map: {
             [key: string]: GoogleAppsScript.Gmail.GmailMessage[];
         } = {};
+        const label_remove_action_map: {
+            [key: string]: GoogleAppsScript.Gmail.GmailMessage[];
+        } = {};
         const moving_action_map = new Map<
             InboxActionType,
             GoogleAppsScript.Gmail.GmailMessage[]
@@ -185,6 +188,12 @@ export class MessageData {
                 }
                 label_action_map[label_name].push(message);
             });
+            action.label_names_to_remove.forEach((label_name) => {
+                if (!(label_name in label_remove_action_map)) {
+                    label_remove_action_map[label_name] = [];
+                }
+                label_remove_action_map[label_name].push(message);
+            });
 
             if (action.inbox_category_names.size > 0) {
               Gmail.Users!.Messages!.modify({
@@ -211,7 +220,16 @@ export class MessageData {
                     .addToThreads(messages.map((message) => message.getThread()));
                 console.log(`add label ${label_name} to ${messages.length} threads`);
             }
-            Logger.log(`Updated labels: ${Object.keys(label_action_map)}.`);
+            Logger.log(`Updated added labels: ${Object.keys(label_action_map)}.`);
+
+            for (const label_name in label_remove_action_map) {
+                const messages = label_remove_action_map[label_name];
+                session_data
+                    .getOrCreateLabel(label_name)
+                    .removeFromThreads(messages.map((message) => message.getThread()));
+                console.log(`remove label ${label_name} from ${messages.length} threads`);
+            }
+            Logger.log(`Updated removed labels: ${Object.keys(label_remove_action_map)}.`);
 
             moving_action_map.forEach((messages, action_type) => {
                 switch (action_type) {
@@ -341,6 +359,7 @@ export class ThreadData {
 
     static applyAllActions(session_data: SessionData, all_thread_data: ThreadData[]) {
         const label_action_map: { [key: string]: GoogleAppsScript.Gmail.GmailThread[] } = {};
+        const label_remove_action_map: { [key: string]: GoogleAppsScript.Gmail.GmailThread[] } = {};
         const moving_action_map = new Map<InboxActionType, GoogleAppsScript.Gmail.GmailThread[]>([
             [InboxActionType.DEFAULT, []],
             [InboxActionType.INBOX, []], [InboxActionType.ARCHIVE, []], [InboxActionType.TRASH, []],
@@ -366,6 +385,12 @@ export class ThreadData {
                 }
                 label_action_map[label_name].push(thread);
             });
+            action.label_names_to_remove.forEach(label_name => {
+                if (!(label_name in label_remove_action_map)) {
+                    label_remove_action_map[label_name] = [];
+                }
+                label_remove_action_map[label_name].push(thread);
+            });
 
             if (action.inbox_category_names.size > 0) {
               Gmail.Users!.Threads!.modify({
@@ -388,7 +413,13 @@ export class ThreadData {
                 session_data.getOrCreateLabel(label_name).addToThreads(threads);
                 console.log(`add label ${label_name} to ${threads.length} threads`);
             }
-            Logger.log(`Updated labels: ${Object.keys(label_action_map)}.`);
+            Logger.log(`Updated added labels: ${Object.keys(label_action_map)}.`);
+            for (const label_name in label_remove_action_map) {
+                const threads = label_remove_action_map[label_name];
+                session_data.getOrCreateLabel(label_name).removeFromThreads(threads);
+                console.log(`remove label ${label_name} from ${threads.length} threads`);
+            }
+            Logger.log(`Updated removed labels: ${Object.keys(label_remove_action_map)}.`);
 
             moving_action_map.forEach((threads, action_type) => {
                 switch (action_type) {

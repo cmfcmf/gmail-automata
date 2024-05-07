@@ -125,6 +125,7 @@ export class Rule {
         const header_map: { [key: string]: number } = {
             conditions: -1,
             add_labels: -1,
+            remove_labels: -1,
             inbox_categories: -1,
             move_to: -1,
             mark_important: -1,
@@ -165,6 +166,8 @@ export class Rule {
             action.addLabels(
                 Rule.parseStringList(values[row][header_map["add_labels"]], ","),
                 config.parent_labeling);
+            action.removeLabels(
+                Rule.parseStringList(values[row][header_map["remove_labels"]], ","));
             action.addInboxCategories(
                 Rule.parseStringList(values[row][header_map["inbox_categories"]], ","));
             action.move_to = Rule.parseInboxActionType(values[row][header_map["move_to"]]);

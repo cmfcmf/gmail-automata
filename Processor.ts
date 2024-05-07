@@ -171,6 +171,7 @@ export class Processor {
                     // move to inbox for visibility
                     thread_data.thread_action.move_to = InboxActionType.INBOX;
                     thread_data.thread_action.label_names.clear();
+                    thread_data.thread_action.label_names_to_remove.clear();
                     thread_data.thread_action.label_names.add(
                         session_data.config.processing_failed_label
                     );
@@ -187,6 +188,7 @@ export class Processor {
                     // move to inbox for visibility
                     message_data.message_action.move_to = InboxActionType.INBOX;
                     message_data.message_action.label_names.clear();
+                    message_data.message_action.label_names_to_remove.clear();
                     message_data.message_action.label_names.add(
                         session_data.config.processing_failed_label
                     );

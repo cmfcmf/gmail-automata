@@ -33,6 +33,7 @@ export default class Action {
     "CATEGORY_FORUMS", "CATEGORY_SOCIAL"] as const;
 
     public readonly label_names: Set<string> = new Set<string>();
+    public readonly label_names_to_remove: Set<string> = new Set<string>();
     public readonly inbox_category_names = new Set<typeof Action.INBOX_CATEGORIES[number]>();
     public move_to: InboxActionType = InboxActionType.DEFAULT;
     public important: BooleanActionType = BooleanActionType.DEFAULT;
@@ -42,6 +43,7 @@ export default class Action {
 
     hasAnyAction() {
         return this.label_names.size > 0
+            || this.label_names_to_remove.size > 0
             || this.inbox_category_names.size > 0
             || this.move_to != InboxActionType.DEFAULT
             || this.important != BooleanActionType.DEFAULT
@@ -54,12 +56,21 @@ export default class Action {
                 let remaining = label;
                 while (remaining) {
                     this.label_names.add(remaining);
+                    this.label_names_to_remove.delete(remaining);
                     const index = remaining.lastIndexOf('/');
                     remaining = remaining.substring(0, index);
                 }
             } else {
                 this.label_names.add(label);
+                this.label_names_to_remove.delete(label);
             }
+        }
+    }
+
+    removeLabels(remove_label_names: string[]) {
+        for (const label of remove_label_names) {
+            this.label_names_to_remove.add(label);
+            this.label_names.delete(label);
         }
     }
 
@@ -75,6 +86,7 @@ export default class Action {
 
     mergeFrom(other: Readonly<Action>, add_parent_labels: boolean): this {
         this.addLabels(Array.from(other.label_names.values()), add_parent_labels);
+        this.removeLabels(Array.from(other.label_names_to_remove.values()));
         this.addInboxCategories(Array.from(other.inbox_category_names.values()));
         if (other.move_to != InboxActionType.DEFAULT) {
             this.move_to = other.move_to;
@@ -91,7 +103,7 @@ export default class Action {
     }
 
     toString() {
-        let result = `>${InboxActionType[this.move_to]} +L${Array.from(this.label_names.values())} +IC${Array.from(this.inbox_category_names.values())} +R${ReadActionType[this.read]} `;
+        let result = `>${InboxActionType[this.move_to]} +L${Array.from(this.label_names.values())} -L${Array.from(this.label_names_to_remove.values())} +IC${Array.from(this.inbox_category_names.values())} +R${ReadActionType[this.read]} `;
         for (const name of Action.ACTION_CONFIG_TYPE_FIELD_NAMES) {
             switch (this[name]) {
                 case BooleanActionType.ENABLE:
